@@ -43,6 +43,10 @@ import { readyRoutes } from "./routes/ready.routes.js";
 import metricsRoutes from "./routes/metrics.routes.js";
 import { statusRoutes } from "./routes/status.routes.js";
 import { reloadRoutes } from "./routes/reload.routes.js";
+import { loggingMiddleware } from "./middleware/logging.middleware.js";
+import { awarenessMiddleware } from "./middleware/awareness.middleware.js" 
+import { notFoundHandler } from "./middleware/notFound.middleware.js";
+import { errorHandlerMiddleware } from "./middleware/errorHandler.middleware.js";
 
 // ============================================================================
 // CONFIGURATION
@@ -94,43 +98,51 @@ let isShuttingDown = false;
 /**
  * Request logging middleware
  */
-app.use((req, res, next) => {
-  const requestId = `req_${Date.now()}_${Math.random()
-    .toString(36)
-    .substr(2, 9)}`;
-  req.requestId = requestId;
+//-----------------------------------
+// app.use((req, res, next) => {
+//   const requestId = `req_${Date.now()}_${Math.random()
+//     .toString(36)
+//     .substr(2, 9)}`;
+//   req.requestId = requestId;
 
-  const start = Date.now();
+//   const start = Date.now();
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    console.log(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        requestId,
-        method: req.method,
-        path: req.path,
-        status: res.statusCode,
-        durationMs: duration,
-      })
-    );
-  });
+//   res.on("finish", () => {
+//     const duration = Date.now() - start;
+//     console.log(
+//       JSON.stringify({
+//         timestamp: new Date().toISOString(),
+//         requestId,
+//         method: req.method,
+//         path: req.path,
+//         status: res.statusCode,
+//         durationMs: duration,
+//       })
+//     );
+//   });
 
-  next();
-});
+//   next();
+// });
 
+//------------------------------------------
+
+//-----------------------------------------
 /**
  * Shutdown awareness middleware
  */
-app.use((req, res, next) => {
-  if (isShuttingDown && req.path !== "/health") {
-    return res.status(503).json({
-      error: "Service shutting down",
-      retryAfter: 5,
-    });
-  }
-  next();
-});
+// app.use((req, res, next) => {
+//   if (isShuttingDown && req.path !== "/health") {
+//     return res.status(503).json({
+//       error: "Service shutting down",
+//       retryAfter: 5,
+//     });
+//   }
+//   next();
+// });
+//------------------------------------------
+
+app.use(loggingMiddleware)
+app.use(awarenessMiddleware(() => isShuttingDown))
 
 // ============================================================================
 // ENDPOINTS
@@ -295,29 +307,36 @@ app.use(readyRoutes(() => isShuttingDown, decisionService, ENGINE_VERSION));
 app.use(metricsRoutes);
 app.use(statusRoutes(decisionService));
 app.use(reloadRoutes(decisionService));
+
+//---------------------------------------
 /**
  * 404 handler
  */
-app.use((req, res) => {
-  res.status(404).json({
-    error: "Not Found",
-    path: req.path,
-    method: req.method,
-  });
-});
+// app.use((req, res) => {
+//   res.status(404).json({
+//     error: "Not Found",
+//     path: req.path,
+//     method: req.method,
+//   });
+// });
 
+app.use(notFoundHandler)
+
+//----------------------------------------
 /**
  * Global error handler
  */
-app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  metrics.recordError("unhandled_exception", req.path);
+// app.use((err, req, res, next) => {
+//   console.error("Unhandled error:", err);
+//   metrics.recordError("unhandled_exception", req.path);
 
-  res.status(500).json({
-    error: "Internal Server Error",
-    requestId: req.requestId,
-  });
-});
+//   res.status(500).json({
+//     error: "Internal Server Error",
+//     requestId: req.requestId,
+//   });
+// });
+
+app.use(errorHandlerMiddleware)
 
 // ============================================================================
 // SERVER LIFECYCLE
