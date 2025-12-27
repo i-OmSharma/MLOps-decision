@@ -1,0 +1,219 @@
+# ============================================================================
+# UNIVERSAL DECISION PLATFORM - RULES CONFIGURATION
+# ============================================================================
+# This file defines domain-agnostic rules for the decision engine.
+# Rules are evaluated in order: DENY rules first, then ALLOW rules.
+# Requests not matching any rule fall into GREY_ZONE for AI analysis (v2).
+# ============================================================================
+
+version: "1.0"
+metadata:
+  description: "Default rules configuration for Universal Decision Platform"
+  last_updated: "2024-01-01"
+
+# ============================================================================
+# RULE DEFINITIONS
+# ============================================================================
+# Each rule has:
+#   - id: Unique identifier for tracking/logging
+#   - name: Human-readable description
+#   - condition: Expression to evaluate against input signals
+#   - outcome: SAFE_ALLOW | SAFE_DENY | GREY_ZONE
+#   - priority: Higher = evaluated first (default: 0)
+#   - enabled: Toggle rule on/off without removing
+# ============================================================================
+
+rules:
+  # ---------------------------------------------------------------------------
+  # HARD DENY RULES (evaluated first, highest priority)
+  # These are non-negotiable - AI cannot override these
+  # ---------------------------------------------------------------------------
+  
+  - id: "DENY_001"
+    name: "Block requests with critical risk signals"
+    description: "Immediately deny if critical risk indicators are present"
+    condition:
+      operator: "OR"
+      operands:
+        - field: "signals.risk_score"
+          op: "gte"
+          value: 95
+        - field: "signals.is_blacklisted"
+          op: "eq"
+          value: true
+        - field: "signals.fraud_confirmed"
+          op: "eq"
+          value: true
+    outcome: "SAFE_DENY"
+    priority: 1000
+    enabled: true
+
+  - id: "DENY_002"
+    name: "Block requests from blocked sources"
+    description: "Deny requests from known malicious sources"
+    condition:
+      operator: "AND"
+      operands:
+        - field: "signals.source_reputation"
+          op: "lt"
+          value: 10
+        - field: "signals.is_verified"
+          op: "eq"
+          value: false
+    outcome: "SAFE_DENY"
+    priority: 900
+    enabled: true
+
+  - id: "DENY_003"
+    name: "Block requests exceeding hard limits"
+    description: "Deny if request exceeds system-defined limits"
+    condition:
+      operator: "OR"
+      operands:
+        - field: "request.amount"
+          op: "gt"
+          value: 1000000
+        - field: "request.frequency"
+          op: "gt"
+          value: 100
+    outcome: "SAFE_DENY"
+    priority: 800
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  # SAFE ALLOW RULES (trusted scenarios)
+  # ---------------------------------------------------------------------------
+  
+  - id: "ALLOW_001"
+    name: "Allow verified trusted sources"
+    description: "Auto-approve requests from highly trusted, verified sources"
+    condition:
+      operator: "AND"
+      operands:
+        - field: "signals.is_verified"
+          op: "eq"
+          value: true
+        - field: "signals.source_reputation"
+          op: "gte"
+          value: 90
+        - field: "signals.risk_score"
+          op: "lt"
+          value: 20
+    outcome: "SAFE_ALLOW"
+    priority: 500
+    enabled: true
+
+  - id: "ALLOW_002"
+    name: "Allow low-value routine requests"
+    description: "Auto-approve small, routine requests from known sources"
+    condition:
+      operator: "AND"
+      operands:
+        - field: "request.amount"
+          op: "lte"
+          value: 100
+        - field: "signals.is_returning"
+          op: "eq"
+          value: true
+        - field: "signals.risk_score"
+          op: "lt"
+          value: 30
+    outcome: "SAFE_ALLOW"
+    priority: 400
+    enabled: true
+
+  - id: "ALLOW_003"
+    name: "Allow whitelisted entities"
+    description: "Auto-approve requests from whitelisted sources"
+    condition:
+      field: "signals.is_whitelisted"
+      op: "eq"
+      value: true
+    outcome: "SAFE_ALLOW"
+    priority: 600
+    enabled: true
+
+  # ---------------------------------------------------------------------------
+  # EXPLICIT GREY ZONE RULES (require human/AI review)
+  # ---------------------------------------------------------------------------
+  
+  - id: "GREY_001"
+    name: "Medium risk requests"
+    description: "Flag requests with moderate risk indicators for review"
+    condition:
+      operator: "AND"
+      operands:
+        - field: "signals.risk_score"
+          op: "gte"
+          value: 40
+        - field: "signals.risk_score"
+          op: "lt"
+          value: 95
+    outcome: "GREY_ZONE"
+    priority: 300
+    enabled: true
+
+  - id: "GREY_002"
+    name: "New source with significant request"
+    description: "Review new sources making non-trivial requests"
+    condition:
+      operator: "AND"
+      operands:
+        - field: "signals.is_returning"
+          op: "eq"
+          value: false
+        - field: "request.amount"
+          op: "gt"
+          value: 500
+    outcome: "GREY_ZONE"
+    priority: 200
+    enabled: true
+
+  - id: "GREY_003"
+    name: "Unusual patterns detected"
+    description: "Review requests with anomalous behavior patterns"
+    condition:
+      operator: "OR"
+      operands:
+        - field: "signals.anomaly_detected"
+          op: "eq"
+          value: true
+        - field: "signals.velocity_spike"
+          op: "eq"
+          value: true
+    outcome: "GREY_ZONE"
+    priority: 350
+    enabled: true
+
+# ============================================================================
+# DEFAULT BEHAVIOR
+# ============================================================================
+# If no rule matches, the request falls into GREY_ZONE by default.
+# This ensures uncertain cases are always reviewed (in v2) rather than
+# accidentally allowed or denied.
+# ============================================================================
+
+defaults:
+  no_match_outcome: "GREY_ZONE"
+  
+# ============================================================================
+# AI ANALYZER CONFIGURATION (v2 only)
+# ============================================================================
+# Settings for how AI should analyze grey-zone requests
+# ============================================================================
+
+ai_config:
+  # Maximum confidence threshold - AI insights above this may influence decision
+  confidence_threshold: 0.7
+  
+  # Context fields to include in AI analysis
+  context_fields:
+    - "request.type"
+    - "request.amount"
+    - "signals.risk_score"
+    - "signals.source_reputation"
+    - "signals.anomaly_details"
+  
+  # AI recommendation weight (0-1) - how much AI opinion affects final decision
+  # Even at 1.0, AI cannot override SAFE_DENY rules
+  recommendation_weight: 0.6
