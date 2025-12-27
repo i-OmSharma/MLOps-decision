@@ -1,0 +1,236 @@
+# ============================================================================
+# UNIVERSAL DECISION PLATFORM - Kubernetes Manifests (v2)
+# ============================================================================
+# v2 = Rules + AI analyzer for grey-zone decisions
+# Canary / experimental deployment
+# ============================================================================
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ai-credentials
+  namespace: decision-platform
+type: Opaque
+stringData:
+  gemini-key: ""
+  claude-key: ""
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: decision-rules-v2
+  namespace: decision-platform
+  labels:
+    app: decision-platform
+    version: v2
+data:
+  rules.yaml: |
+    version: "1.0"
+    metadata:
+      description: "Production rules v2 with AI support"
+      last_updated: "2024-01-01"
+
+    rules:
+      - id: "DENY_001"
+        name: "Block critical risk"
+        condition:
+          operator: "OR"
+          operands:
+            - field: "signals.risk_score"
+              op: "gte"
+              value: 95
+            - field: "signals.is_blacklisted"
+              op: "eq"
+              value: true
+        outcome: "SAFE_DENY"
+        priority: 1000
+        enabled: true
+
+      - id: "ALLOW_001"
+        name: "Allow trusted verified"
+        condition:
+          operator: "AND"
+          operands:
+            - field: "signals.is_verified"
+              op: "eq"
+              value: true
+            - field: "signals.source_reputation"
+              op: "gte"
+              value: 90
+            - field: "signals.risk_score"
+              op: "lt"
+              value: 20
+        outcome: "SAFE_ALLOW"
+        priority: 500
+        enabled: true
+
+      - id: "ALLOW_002"
+        name: "Allow whitelisted"
+        condition:
+          field: "signals.is_whitelisted"
+          op: "eq"
+          value: true
+        outcome: "SAFE_ALLOW"
+        priority: 600
+        enabled: true
+
+      - id: "GREY_001"
+        name: "Medium risk review"
+        condition:
+          operator: "AND"
+          operands:
+            - field: "signals.risk_score"
+              op: "gte"
+              value: 40
+            - field: "signals.risk_score"
+              op: "lt"
+              value: 95
+        outcome: "GREY_ZONE"
+        priority: 300
+        enabled: true
+
+    defaults:
+      no_match_outcome: "GREY_ZONE"
+
+    ai_config:
+      confidence_threshold: 0.7
+      recommendation_weight: 0.6
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decision-platform-v2
+  namespace: decision-platform
+  labels:
+    app: decision-platform
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: decision-platform
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: decision-platform
+        version: v2
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: decision-platform
+          image: decision-platform:v2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: ENGINE_VERSION
+              value: "v2"
+            - name: AI_ENABLED
+              value: "true"
+
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-credentials
+                  key: gemini-key
+
+            - name: CLAUDE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-credentials
+                  key: claude-key
+
+            - name: GEMINI_PRIMARY_MODEL
+              value: "gemini-3.0-flash"
+            - name: GEMINI_FALLBACK_MODEL
+              value: "gemini-2.5-flash"
+            - name: CLAUDE_MODEL
+              value: "claude-3-haiku"
+
+            - name: RULES_CONFIG_PATH
+              value: "/config/rules.yaml"
+
+          volumeMounts:
+            - name: rules-config
+              mountPath: /config
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+      volumes:
+        - name: rules-config
+          configMap:
+            name: decision-rules-v2
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: decision-platform-v2
+  namespace: decision-platform
+  labels:
+    app: decision-platform
+    version: v2
+spec:
+  type: ClusterIP
+  selector:
+    app: decision-platform
+    version: v2
+  ports:
+    - port: 80
+      targetPort: 3000
+      name: http
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: decision-platform-v2-hpa
+  namespace: decision-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: decision-platform-v2
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
