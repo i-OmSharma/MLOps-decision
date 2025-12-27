@@ -1,0 +1,128 @@
+# ============================================================================
+# UNIVERSAL DECISION PLATFORM - Prometheus ServiceMonitor
+# ============================================================================
+# For Prometheus Operator - auto-discovers and scrapes metrics
+# ============================================================================
+
+---
+# ServiceMonitor for v1
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: decision-platform-v1
+  namespace: decision-platform
+  labels:
+    app: decision-platform
+    version: v1
+    release: prometheus  # Match your Prometheus Operator release
+spec:
+  selector:
+    matchLabels:
+      app: decision-platform
+      version: v1
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - decision-platform
+
+---
+# ServiceMonitor for v2
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: decision-platform-v2
+  namespace: decision-platform
+  labels:
+    app: decision-platform
+    version: v2
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: decision-platform
+      version: v2
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - decision-platform
+
+---
+# PrometheusRule for alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: decision-platform-alerts
+  namespace: decision-platform
+  labels:
+    app: decision-platform
+    release: prometheus
+spec:
+  groups:
+    - name: decision-platform
+      rules:
+        # High error rate alert
+        - alert: DecisionPlatformHighErrorRate
+          expr: |
+            sum(rate(decision_platform_errors_total[5m])) by (version) 
+            / sum(rate(decision_platform_decisions_total[5m])) by (version) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High error rate in Decision Platform {{ $labels.version }}"
+            description: "Error rate is {{ $value | humanizePercentage }} over 5m"
+
+        # High latency alert
+        - alert: DecisionPlatformHighLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(decision_platform_request_duration_ms_bucket[5m])) by (le, version)) > 1000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High P95 latency in Decision Platform {{ $labels.version }}"
+            description: "P95 latency is {{ $value }}ms"
+
+        # AI timeout rate alert (v2 only)
+        - alert: DecisionPlatformAITimeouts
+          expr: |
+            sum(rate(decision_platform_ai_invocations_total{success="false"}[5m])) 
+            / sum(rate(decision_platform_ai_invocations_total[5m])) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High AI timeout rate in Decision Platform v2"
+            description: "AI failure rate is {{ $value | humanizePercentage }}"
+
+        # Grey zone spike alert
+        - alert: DecisionPlatformGreyZoneSpike
+          expr: |
+            sum(rate(decision_platform_decisions_total{outcome="GREY_ZONE"}[5m])) 
+            / sum(rate(decision_platform_decisions_total[5m])) > 0.3
+          for: 10m
+          labels:
+            severity: info
+          annotations:
+            summary: "High grey zone rate in Decision Platform"
+            description: "{{ $value | humanizePercentage }} of decisions are grey zone"
+
+        # Pod availability
+        - alert: DecisionPlatformPodDown
+          expr: |
+            kube_deployment_status_replicas_available{deployment=~"decision-platform.*"} 
+            < kube_deployment_spec_replicas{deployment=~"decision-platform.*"}
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Decision Platform pods unavailable"
+            description: "{{ $labels.deployment }} has {{ $value }} pods available"
