@@ -12,6 +12,9 @@ FROM node:22-alpine AS deps
 
 WORKDIR /app
 
+# Update Alpine packages (SECURITY FIX)
+RUN apk update && apk upgrade --no-cache
+
 # Copy package files
 COPY package*.json ./
 
@@ -23,6 +26,10 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Stage 2: Production image
 # ---------------------------------------------------------------------------
 FROM node:22-alpine AS runner
+
+# Update Alpine packages (SECURITY FIX)
+RUN apk update && apk upgrade --no-cache \
+    && apk add --no-cache curl
 
 # Security: Run as non-root user
 RUN addgroup --system --gid 1001 nodejs && \
@@ -49,8 +56,12 @@ ENV AI_ENABLED=false
 EXPOSE 3000
 
 # Health check
+# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+#   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD curl -fs http://localhost:3000/health || exit 1
+
 
 # Switch to non-root user
 USER decision
