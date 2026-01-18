@@ -13,8 +13,7 @@ metadata:
   namespace: decision-platform
 type: Opaque
 stringData:
-  gemini-key: <API_KEY>
-  claude-key: <API_KEY>
+  gemini-key: ""
 
 ---
 apiVersion: v1
@@ -125,7 +124,7 @@ spec:
     spec:
       containers:
         - name: decision-platform
-          image: ghcr.io/i-omsharma/decision-control-plane:v2-fix
+          image: ghcr.io/i-omsharma/decision-control-plane:v2-confidence-fix
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
@@ -147,18 +146,10 @@ spec:
                   name: ai-credentials
                   key: gemini-key
 
-            - name: CLAUDE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: ai-credentials
-                  key: claude-key
-
             - name: GEMINI_PRIMARY_MODEL
-              value: "gemini-3.0-flash"
+              value: "gemini-2.5-flash-lite"
             - name: GEMINI_FALLBACK_MODEL
-              value: "gemini-2.5-flash"
-            - name: CLAUDE_MODEL
-              value: "claude-3-haiku"
+              value: "gemini-1.5-flash"
 
             - name: RULES_CONFIG_PATH
               value: "/config/rules.yaml"

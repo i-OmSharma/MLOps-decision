@@ -1,10 +1,11 @@
 import { Router } from "express";
-import * as metrics from "../metrics/prometheus.js"
+import * as metrics from "../metrics/prometheus.js";
+import { decisionRateLimiter } from "../middleware/rateLimit.middleware.js";
 
 export function decisionRoutes(decisionService, ENGINE_VERSION) {
   const router = Router();
 
-  router.post("/decide", async (req, res) => {
+  router.post("/decide", decisionRateLimiter, async (req, res) => {
     try {
       const input = req.body;
       const result = await decisionService.decide(input, req.requestId);
@@ -13,7 +14,7 @@ export function decisionRoutes(decisionService, ENGINE_VERSION) {
 
       res.status(statusCode).json(result);
     } catch (error) {
-      console.error(`[${req.requestId}] Deciosn error`, error);
+      console.error(`[${req.requestId}] Decision error`, error);
       metrics.recordError("unhandled_error", "/decide");
 
       res.status(500).json({

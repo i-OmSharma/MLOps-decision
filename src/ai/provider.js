@@ -27,7 +27,7 @@ export function buildAIProviders(env) {
       name: "gemini",
       model: env.GEMINI_PRIMARY_MODEL,
       apiKey: env.GEMINI_API_KEY,
-      apiUrl: "https://generativelanguage.googleapis.com/v1/models"
+      apiUrl: "https://generativelanguage.googleapis.com/v1beta/models"
     });
   }
 
@@ -43,21 +43,21 @@ export function buildAIProviders(env) {
       name: "gemini",
       model: env.GEMINI_FALLBACK_MODEL,
       apiKey: env.GEMINI_API_KEY,
-      apiUrl: "https://generativelanguage.googleapis.com/v1/models"
+      apiUrl: "https://generativelanguage.googleapis.com/v1beta/models"
     });
   }
 
   // --------------------------------------------------------------------------
   // Claude (Anthropic)
   // --------------------------------------------------------------------------
-  if (env.CLAUDE_API_KEY && env.CLAUDE_MODEL) {
-    providers.push({
-      name: "claude",
-      model: env.CLAUDE_MODEL,
-      apiKey: env.CLAUDE_API_KEY,
-      apiUrl: "https://api.anthropic.com/v1/messages"
-    });
-  }
+  // if (env.CLAUDE_API_KEY && env.CLAUDE_MODEL) {
+  //   providers.push({
+  //     name: "claude",
+  //     model: env.CLAUDE_MODEL,
+  //     apiKey: env.CLAUDE_API_KEY,
+  //     apiUrl: "https://api.anthropic.com/v1/messages"
+  //   });
+  // }
 
   return providers;
 }

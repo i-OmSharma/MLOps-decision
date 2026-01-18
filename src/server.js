@@ -73,7 +73,7 @@ const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS) || 5000;
 // ============================================================================
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "100kb" })); // Protect against large payload attacks
 app.use(corsMiddleware)
 
 // Initialize decision service

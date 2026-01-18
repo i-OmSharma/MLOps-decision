@@ -1,4 +1,5 @@
 import axios from "axios";
+import { CircuitBreaker } from "./circuitBreaker.js";
 
 /**
  * ============================================================================
@@ -14,6 +15,13 @@ export class AIAnalyzer {
     this.providers = config.providers || [];
     this.timeout = config.timeout || 5000;
     this.confidenceThreshold = config.confidenceThreshold || 0.7;
+
+    // Initialize circuit breaker
+    this.circuitBreaker = new CircuitBreaker({
+      failureThreshold: 5, // Open circuit after 5 consecutive failures
+      resetTimeout: 60000, // Try again after 60 seconds
+      halfOpenMaxAttempts: 1, // Test with 1 request when recovering
+    });
   }
 
   // ============================================================================
@@ -28,6 +36,25 @@ ${JSON.stringify(input, null, 2)}
 
 RULE CONTEXT:
 ${JSON.stringify(ruleContext.evaluationPath || [], null, 2)}
+
+CONFIDENCE SCORING GUIDELINES:
+- 0.1-0.3 (LOW): Missing critical data, highly ambiguous signals, conflicting indicators
+- 0.3-0.5 (LOW-MEDIUM): Incomplete data, some ambiguity, weak patterns
+- 0.5-0.7 (MEDIUM): Adequate data, moderate clarity, balanced risk/mitigation factors
+- 0.7-0.85 (HIGH-MEDIUM): Good data quality, clear patterns, strong indicators
+- 0.85-1.0 (HIGH): Complete data, unambiguous signals, very clear risk profile
+
+Factors that LOWER confidence:
+- Missing key fields (type, amount, verification status, reputation)
+- Conflicting signals (high risk score but verified, low reputation but high amount)
+- Edge cases or unusual patterns
+- Insufficient context in rule evaluation path
+
+Factors that RAISE confidence:
+- All relevant fields present with clear values
+- Aligned signals pointing same direction
+- Clear match with rule criteria
+- Typical/standard transaction patterns
 
 Respond ONLY with valid JSON.
 Do not include explanations, markdown, or code fences.
@@ -49,71 +76,44 @@ JSON schema:
   // ============================================================================
 
   async callProvider(provider, prompt) {
-    let url;
-    let headers = { "Content-Type": "application/json" };
-    let body;
-
-    if (provider.name === "gemini") {
-      url = `${provider.apiUrl}/${provider.model}:generateContent?key=${provider.apiKey}`;
-      body = { contents: [{ parts: [{ text: prompt }] }] };
-    } else if (provider.name === "claude") {
-      url = provider.apiUrl;
-      headers["x-api-key"] = provider.apiKey;
-      headers["anthropic-version"] = "2023-06-01";
-      body = {
-        model: provider.model,
-        max_tokens: 500,
-        messages: [{ role: "user", content: prompt }],
-      };
-    } else {
-      throw new Error(`Unknown provider: ${provider.name}`);
+    if (provider.name !== "gemini") {
+      throw new Error(`Unsupported provider: ${provider.name}`);
     }
+
+    const url = `${provider.apiUrl}/${provider.model}:generateContent?key=${provider.apiKey}`;
+    const headers = { "Content-Type": "application/json" };
+    const body = { contents: [{ parts: [{ text: prompt }] }] };
 
     const response = await axios.post(url, body, {
       headers,
       timeout: this.timeout,
     });
 
-    // Gemini safety block
-    if (
-      provider.name === "gemini" &&
-      response.data?.promptFeedback?.blockReason
-    ) {
+    // Gemini safety block check
+    if (response.data?.promptFeedback?.blockReason) {
       throw new Error(
         `GEMINI_BLOCKED:${response.data.promptFeedback.blockReason}`
       );
     }
 
-    const content = this.extractContent(provider.name, response);
+    const content = this.extractContent(response);
     if (!content) {
-      throw new Error(
-        provider.name === "gemini"
-          ? "GEMINI_EMPTY_RESPONSE"
-          : "EMPTY_AI_RESPONSE"
-      );
+      throw new Error("GEMINI_EMPTY_RESPONSE");
     }
 
     return content;
   }
 
-extractContent(providerName, response) {
-  if (providerName === "gemini") {
-    const parts = response.data?.candidates?.[0]?.content?.parts;
-    if (!Array.isArray(parts)) return null;
+extractContent(response) {
+  const parts = response.data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return null;
 
-    const text = parts
-      .map(p => typeof p.text === "string" ? p.text : "")
-      .join("")
-      .trim();
+  const text = parts
+    .map(p => typeof p.text === "string" ? p.text : "")
+    .join("")
+    .trim();
 
-    return text.length > 0 ? text : null;
-  }
-
-  if (providerName === "claude") {
-    return response.data?.content?.[0]?.text || null;
-  }
-
-  return null;
+  return text.length > 0 ? text : null;
 }
 
 
@@ -162,9 +162,21 @@ extractContent(providerName, response) {
     const prompt = this.buildPrompt(input, ruleContext);
 
     for (const provider of this.providers) {
+      // Check circuit breaker before attempting
+      const circuitCheck = this.circuitBreaker.allowRequest(provider);
+      if (!circuitCheck.allowed) {
+        console.warn(
+          `[AIAnalyzer] ${provider.name} (${provider.model}) skipped - ${circuitCheck.reason}`
+        );
+        continue; // Skip this provider, try next
+      }
+
       try {
         const raw = await this.callProvider(provider, prompt);
         const parsed = this.parseResponse(raw);
+
+        // Record success with circuit breaker
+        this.circuitBreaker.recordSuccess(provider);
 
         return {
           analyzed: true,
@@ -176,6 +188,9 @@ extractContent(providerName, response) {
           ...parsed,
         };
       } catch (err) {
+        // Record failure with circuit breaker
+        this.circuitBreaker.recordFailure(provider, err);
+
         console.warn(
           `[AIAnalyzer] ${provider.name} (${provider.model}) failed → fallback`,
           err.message
@@ -238,6 +253,7 @@ extractContent(providerName, response) {
         model: p.model,
       })),
       confidenceThreshold: this.confidenceThreshold,
+      circuitBreaker: this.circuitBreaker.getStatus(),
     };
   }
 }
