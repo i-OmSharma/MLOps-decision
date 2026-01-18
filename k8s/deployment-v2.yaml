@@ -13,7 +13,7 @@ metadata:
   namespace: decision-platform
 type: Opaque
 stringData:
-  gemini-key: ""
+  gemini-key: AIzaSyB6pXf0QfFLTrhCZft1JJH_JdOVXpftXzk
 
 ---
 apiVersion: v1
